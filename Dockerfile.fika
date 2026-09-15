@@ -18,6 +18,9 @@
 ARG SPT_VERSION=4.1.5
 FROM ghcr.io/sp-tushonka/server-csharp:${SPT_VERSION}
 
+# ARG 在 FROM 之前声明属于全局作用域；FROM 之后要再声明一次才能用，
+# 否则下面 LABEL 里的 ${SPT_VERSION} 会是空字符串
+ARG SPT_VERSION
 ARG FIKA_VERSION=2.4.1
 
 LABEL org.opencontainers.image.title="SPT ${SPT_VERSION} + Fika ${FIKA_VERSION}" \
