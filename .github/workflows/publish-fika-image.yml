@@ -5,10 +5,12 @@ name: Build and publish SPT + Fika image
 #
 # 触发方式：
 #   1. 手动（Actions 页面点 Run workflow，可指定版本）
-#   2. 推送到 main 分支
+#   2. 推送到 master / main 分支
 #   3. 推送 v* 标签
 #
-# 产出：ghcr.io/<owner>/<repo>:<tag>
+# 产出：ghcr.io/kazusa1085/fika-spt-server-docker:<tag>
+# 注意：GHCR 要求镜像路径全小写，而 GitHub 用户名可能含大写
+#      （本仓库是 Kazusa1085），所以下面统一转成小写。
 
 on:
   workflow_dispatch:
@@ -27,10 +29,6 @@ on:
     branches: [master, main]
     tags: ["v*"]
 
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
-
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
@@ -43,14 +41,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # GHCR 的镜像路径必须全小写；${VAR,,} 是 bash 的小写展开
+      - name: Compute image name
+        id: image
+        run: echo "name=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
       - name: Resolve versions
         id: versions
+        env:
+          INPUT_SPT: ${{ github.event.inputs.spt_version }}
+          INPUT_FIKA: ${{ github.event.inputs.fika_version }}
         run: |
-          SPT="${{ github.event.inputs.spt_version || '4.1.5' }}"
-          FIKA="${{ github.event.inputs.fika_version || '2.4.1' }}"
+          SPT="${INPUT_SPT:-4.1.5}"
+          FIKA="${INPUT_FIKA:-2.4.1}"
           echo "spt=$SPT"   >> "$GITHUB_OUTPUT"
           echo "fika=$FIKA" >> "$GITHUB_OUTPUT"
-          echo "使用 SPT $SPT + Fika $FIKA"
+          echo "使用 SPT $SPT + Fika $FIKA，镜像名 ghcr.io/${{ steps.image.outputs.name }}"
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -61,7 +67,7 @@ jobs:
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
@@ -71,13 +77,13 @@ jobs:
           context: .
           file: ./Dockerfile.fika
           push: true
-          # 官方基底镜像是多架构的，这里两种都构建，x86 / ARM 的 NAS 都能用
+          # 官方基底镜像是多架构的，两种都构建，x86 / ARM 的 NAS 都能用
           platforms: linux/amd64,linux/arm64
           tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.versions.outputs.spt }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:fika-${{ steps.versions.outputs.fika }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.versions.outputs.spt }}-fika${{ steps.versions.outputs.fika }}
+            ghcr.io/${{ steps.image.outputs.name }}:latest
+            ghcr.io/${{ steps.image.outputs.name }}:${{ steps.versions.outputs.spt }}
+            ghcr.io/${{ steps.image.outputs.name }}:fika-${{ steps.versions.outputs.fika }}
+            ghcr.io/${{ steps.image.outputs.name }}:${{ steps.versions.outputs.spt }}-fika${{ steps.versions.outputs.fika }}
           build-args: |
             SPT_VERSION=${{ steps.versions.outputs.spt }}
             FIKA_VERSION=${{ steps.versions.outputs.fika }}
@@ -90,9 +96,11 @@ jobs:
             echo "## 镜像已发布"
             echo
             echo '```'
-            echo "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.versions.outputs.spt }}-fika${{ steps.versions.outputs.fika }}"
+            echo "docker pull ghcr.io/${{ steps.image.outputs.name }}:${{ steps.versions.outputs.spt }}-fika${{ steps.versions.outputs.fika }}"
             echo '```'
             echo
             echo "- SPT: \`${{ steps.versions.outputs.spt }}\`"
             echo "- Fika: \`${{ steps.versions.outputs.fika }}\`"
+            echo
+            echo "> ⚠️ 首次发布后需在 GitHub 把该 package 的可见性改成 **Public**，否则别人无法拉取。"
           } >> "$GITHUB_STEP_SUMMARY"
