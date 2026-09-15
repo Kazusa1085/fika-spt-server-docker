@@ -1,0 +1,55 @@
+# syntax=docker/dockerfile:1
+
+# =============================================================================
+# SPT + Fika —— 薄层方案（基于官方镜像）
+#
+# 用途：在 CI（GitHub Actions）里构建并推送到 GHCR。
+#   GitHub 的 runner 访问 GHCR 是满速的，所以在那里用官方镜像做基底、
+#   只加一层 Fika，构建只要几十秒，比从源码编译快得多。
+#
+# 注意：这个 Dockerfile 在【国内本机】构建会很慢 —— 实测 ghcr.io 的层
+#       下载只有约 160 KB/s（比 mcr 慢 9 倍）。国内构建请用仓库里的
+#       另一个 Dockerfile（从源码构建，不依赖 GHCR）。
+#
+# 本地构建（网络好的情况）：
+#   docker build -f Dockerfile.fika -t spt-fika:4.1.5 .
+# =============================================================================
+
+ARG SPT_VERSION=4.1.5
+FROM ghcr.io/sp-tushonka/server-csharp:${SPT_VERSION}
+
+ARG FIKA_VERSION=2.4.1
+
+LABEL org.opencontainers.image.title="SPT ${SPT_VERSION} + Fika ${FIKA_VERSION}" \
+      org.opencontainers.image.description="SPT server with the Fika multiplayer mod built in" \
+      org.opencontainers.image.source="https://github.com/Kazusa1085/fika-spt-server-docker" \
+      org.opencontainers.image.licenses="CC-BY-NC-SA-4.0"
+
+# -----------------------------------------------------------------------------
+# 内置 Fika 服务端 mod
+#
+# ⚠️ 放在 /opt/defaults-user 而不是 /opt/spt/user：
+#    基础镜像声明了 VOLUME /opt/spt/user，挂载的卷会遮住镜像在该路径的内容。
+#    放到卷外，由 init-user.sh 在首次启动时填充进卷。
+# -----------------------------------------------------------------------------
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends curl unzip ca-certificates; \
+    rm -rf /var/lib/apt/lists/*; \
+    \
+    curl -fsSL -o /tmp/fika.zip \
+        "https://github.com/project-fika/Fika-Server-CSharp/releases/download/v${FIKA_VERSION}/Fika.Server.Release.${FIKA_VERSION}.zip"; \
+    mkdir -p /tmp/fika /opt/defaults-user/mods; \
+    unzip -q /tmp/fika.zip -d /tmp/fika; \
+    cp -a /tmp/fika/SPT_Runtime/user/mods/fika-server /opt/defaults-user/mods/; \
+    rm -rf /tmp/fika /tmp/fika.zip; \
+    apt-get purge -y --auto-remove unzip; \
+    \
+    echo "内置 Fika ${FIKA_VERSION}:"; \
+    ls -la /opt/defaults-user/mods/fika-server/
+
+# 首次启动初始化（填充卷 → 交给官方 entrypoint）
+COPY init-user.sh /usr/local/bin/init-user.sh
+RUN chmod +x /usr/local/bin/init-user.sh
+
+ENTRYPOINT ["/usr/local/bin/init-user.sh"]
